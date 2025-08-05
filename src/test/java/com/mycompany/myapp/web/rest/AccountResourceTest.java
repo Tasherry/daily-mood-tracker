@@ -53,6 +53,9 @@ class AccountResourceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private com.mycompany.myapp.service.MailService mailService;
+
     @InjectMocks
     private AccountResource accountResource;
 
@@ -129,12 +132,14 @@ class AccountResourceTest {
     void shouldRegisterAccount() {
         // Given
         when(userService.registerUser(any(ManagedUserVM.class), anyString())).thenReturn(user);
+        doNothing().when(mailService).sendActivationEmail(any(User.class));
 
         // When
         accountResource.registerAccount(managedUserVM);
 
         // Then
         verify(userService).registerUser(managedUserVM, managedUserVM.getPassword());
+        verify(mailService).sendActivationEmail(user);
     }
 
     @Test
@@ -193,13 +198,15 @@ class AccountResourceTest {
     void shouldRequestPasswordReset() {
         // Given
         String email = DEFAULT_EMAIL;
-        doNothing().when(userService).requestPasswordReset(email);
+        when(userService.requestPasswordReset(email)).thenReturn(Optional.of(user));
+        doNothing().when(mailService).sendPasswordResetMail(any(User.class));
 
         // When
         accountResource.requestPasswordReset(email);
 
         // Then
         verify(userService).requestPasswordReset(email);
+        verify(mailService).sendPasswordResetMail(user);
     }
 
     @Test
@@ -251,13 +258,21 @@ class AccountResourceTest {
         // Given
         try (MockedStatic<SecurityUtils> mockedSecurityUtils = mockStatic(SecurityUtils.class)) {
             mockedSecurityUtils.when(SecurityUtils::getCurrentUserLogin).thenReturn(Optional.of(DEFAULT_LOGIN));
-            doNothing().when(userService).updateUser(any(AdminUserDTO.class));
+            when(userRepository.findOneByEmailIgnoreCase(DEFAULT_EMAIL)).thenReturn(Optional.empty());
+            when(userRepository.findOneByLogin(DEFAULT_LOGIN)).thenReturn(Optional.of(user));
+            doNothing().when(userService).updateUser(anyString(), anyString(), anyString(), anyString(), anyString());
 
             // When
             accountResource.saveAccount(adminUserDTO);
 
             // Then
-            verify(userService).updateUser(adminUserDTO);
+            verify(userService).updateUser(
+                adminUserDTO.getFirstName(),
+                adminUserDTO.getLastName(),
+                adminUserDTO.getEmail(),
+                adminUserDTO.getLangKey(),
+                adminUserDTO.getImageUrl()
+            );
         }
     }
 
@@ -266,7 +281,9 @@ class AccountResourceTest {
         // Given
         try (MockedStatic<SecurityUtils> mockedSecurityUtils = mockStatic(SecurityUtils.class)) {
             mockedSecurityUtils.when(SecurityUtils::getCurrentUserLogin).thenReturn(Optional.of(DEFAULT_LOGIN));
-            doThrow(new EmailAlreadyUsedException()).when(userService).updateUser(any(AdminUserDTO.class));
+            User existingUser = new User();
+            existingUser.setLogin("different-user");
+            when(userRepository.findOneByEmailIgnoreCase(DEFAULT_EMAIL)).thenReturn(Optional.of(existingUser));
 
             // When & Then
             assertThatThrownBy(() -> accountResource.saveAccount(adminUserDTO)).isInstanceOf(EmailAlreadyUsedException.class);
@@ -274,14 +291,15 @@ class AccountResourceTest {
     }
 
     @Test
-    void shouldThrowExceptionWhenSavingAccountWithExistingLogin() {
+    void shouldThrowExceptionWhenSavingAccountWithoutAuthentication() {
         // Given
         try (MockedStatic<SecurityUtils> mockedSecurityUtils = mockStatic(SecurityUtils.class)) {
-            mockedSecurityUtils.when(SecurityUtils::getCurrentUserLogin).thenReturn(Optional.of(DEFAULT_LOGIN));
-            doThrow(new LoginAlreadyUsedException()).when(userService).updateUser(any(AdminUserDTO.class));
+            mockedSecurityUtils.when(SecurityUtils::getCurrentUserLogin).thenReturn(Optional.empty());
 
             // When & Then
-            assertThatThrownBy(() -> accountResource.saveAccount(adminUserDTO)).isInstanceOf(LoginAlreadyUsedException.class);
+            assertThatThrownBy(() -> accountResource.saveAccount(adminUserDTO))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("Current user login not found");
         }
     }
 }

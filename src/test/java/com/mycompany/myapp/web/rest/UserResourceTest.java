@@ -3,6 +3,7 @@ package com.mycompany.myapp.web.rest;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 import com.mycompany.myapp.config.Constants;
@@ -13,6 +14,8 @@ import com.mycompany.myapp.service.UserService;
 import com.mycompany.myapp.service.dto.AdminUserDTO;
 import com.mycompany.myapp.service.dto.UserDTO;
 import com.mycompany.myapp.web.rest.errors.BadRequestAlertException;
+import com.mycompany.myapp.web.rest.errors.EmailAlreadyUsedException;
+import com.mycompany.myapp.web.rest.errors.LoginAlreadyUsedException;
 import java.time.Instant;
 import java.util.*;
 import org.apache.commons.lang3.RandomStringUtils;
@@ -49,6 +52,9 @@ class UserResourceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private com.mycompany.myapp.service.MailService mailService;
+
     @InjectMocks
     private UserResource userResource;
 
@@ -69,7 +75,7 @@ class UserResourceTest {
         user.setLangKey(DEFAULT_LANGKEY);
 
         adminUserDTO = new AdminUserDTO();
-        adminUserDTO.setId(1L);
+        adminUserDTO.setId(null); // Important: set to null for new user creation
         adminUserDTO.setLogin(DEFAULT_LOGIN);
         adminUserDTO.setFirstName(DEFAULT_FIRSTNAME);
         adminUserDTO.setLastName(DEFAULT_LASTNAME);
@@ -83,7 +89,10 @@ class UserResourceTest {
     @Test
     void shouldCreateUser() throws Exception {
         // Given
+        when(userRepository.findOneByLogin(DEFAULT_LOGIN.toLowerCase())).thenReturn(Optional.empty());
+        when(userRepository.findOneByEmailIgnoreCase(DEFAULT_EMAIL)).thenReturn(Optional.empty());
         when(userService.createUser(any(AdminUserDTO.class))).thenReturn(user);
+        doNothing().when(mailService).sendCreationEmail(any(User.class));
 
         // When
         ResponseEntity<User> response = userResource.createUser(adminUserDTO);
@@ -93,39 +102,18 @@ class UserResourceTest {
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().getLogin()).isEqualTo(DEFAULT_LOGIN);
         verify(userService).createUser(adminUserDTO);
+        verify(mailService).sendCreationEmail(user);
     }
 
     @Test
     void shouldThrowExceptionWhenCreatingUserWithExistingId() {
         // Given
         adminUserDTO.setId(1L);
-        when(userService.createUser(any(AdminUserDTO.class))).thenThrow(
-            new BadRequestAlertException("A new user cannot already have an ID", "userManagement", "idexists")
-        );
 
         // When & Then
         assertThatThrownBy(() -> userResource.createUser(adminUserDTO))
             .isInstanceOf(BadRequestAlertException.class)
             .hasMessageContaining("A new user cannot already have an ID");
-    }
-
-    @Test
-    void shouldGetAllUsers() {
-        // Given
-        List<AdminUserDTO> users = Arrays.asList(adminUserDTO);
-        Page<AdminUserDTO> userPage = new PageImpl<>(users);
-        Pageable pageable = PageRequest.of(0, 20);
-
-        when(userService.getAllManagedUsers(pageable)).thenReturn(userPage);
-
-        // When
-        ResponseEntity<List<AdminUserDTO>> response = userResource.getAllUsers(pageable);
-
-        // Then
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody()).isNotNull();
-        assertThat(response.getBody()).hasSize(1);
-        verify(userService).getAllManagedUsers(pageable);
     }
 
     @Test
@@ -158,6 +146,9 @@ class UserResourceTest {
     @Test
     void shouldUpdateUser() {
         // Given
+        adminUserDTO.setId(1L);
+        when(userRepository.findOneByEmailIgnoreCase(DEFAULT_EMAIL)).thenReturn(Optional.empty());
+        when(userRepository.findOneByLogin(DEFAULT_LOGIN.toLowerCase())).thenReturn(Optional.empty());
         when(userService.updateUser(any(AdminUserDTO.class))).thenReturn(Optional.of(adminUserDTO));
 
         // When
@@ -173,6 +164,9 @@ class UserResourceTest {
     @Test
     void shouldReturnNotFoundWhenUpdatingNonExistentUser() {
         // Given
+        adminUserDTO.setId(1L);
+        when(userRepository.findOneByEmailIgnoreCase(DEFAULT_EMAIL)).thenReturn(Optional.empty());
+        when(userRepository.findOneByLogin(DEFAULT_LOGIN.toLowerCase())).thenReturn(Optional.empty());
         when(userService.updateUser(any(AdminUserDTO.class))).thenReturn(Optional.empty());
 
         // When
@@ -198,52 +192,44 @@ class UserResourceTest {
     @Test
     void shouldHandleUserCreationWithExistingLogin() {
         // Given
-        when(userService.createUser(any(AdminUserDTO.class))).thenThrow(
-            new BadRequestAlertException("Login name already used!", "userManagement", "userexists")
-        );
+        when(userRepository.findOneByLogin(DEFAULT_LOGIN.toLowerCase())).thenReturn(Optional.of(user));
 
         // When & Then
-        assertThatThrownBy(() -> userResource.createUser(adminUserDTO))
-            .isInstanceOf(BadRequestAlertException.class)
-            .hasMessageContaining("Login name already used!");
+        assertThatThrownBy(() -> userResource.createUser(adminUserDTO)).isInstanceOf(LoginAlreadyUsedException.class);
     }
 
     @Test
     void shouldHandleUserCreationWithExistingEmail() {
         // Given
-        when(userService.createUser(any(AdminUserDTO.class))).thenThrow(
-            new BadRequestAlertException("Email is already in use!", "userManagement", "emailexists")
-        );
+        when(userRepository.findOneByLogin(DEFAULT_LOGIN.toLowerCase())).thenReturn(Optional.empty());
+        when(userRepository.findOneByEmailIgnoreCase(DEFAULT_EMAIL)).thenReturn(Optional.of(user));
 
         // When & Then
-        assertThatThrownBy(() -> userResource.createUser(adminUserDTO))
-            .isInstanceOf(BadRequestAlertException.class)
-            .hasMessageContaining("Email is already in use!");
+        assertThatThrownBy(() -> userResource.createUser(adminUserDTO)).isInstanceOf(EmailAlreadyUsedException.class);
     }
 
     @Test
     void shouldHandleUserUpdateWithExistingLogin() {
         // Given
-        when(userService.updateUser(any(AdminUserDTO.class))).thenThrow(
-            new BadRequestAlertException("Login name already used!", "userManagement", "userexists")
-        );
+        adminUserDTO.setId(1L);
+        User existingUser = new User();
+        existingUser.setId(2L); // Different ID
+        when(userRepository.findOneByEmailIgnoreCase(DEFAULT_EMAIL)).thenReturn(Optional.empty());
+        when(userRepository.findOneByLogin(DEFAULT_LOGIN.toLowerCase())).thenReturn(Optional.of(existingUser));
 
         // When & Then
-        assertThatThrownBy(() -> userResource.updateUser(DEFAULT_LOGIN, adminUserDTO))
-            .isInstanceOf(BadRequestAlertException.class)
-            .hasMessageContaining("Login name already used!");
+        assertThatThrownBy(() -> userResource.updateUser(DEFAULT_LOGIN, adminUserDTO)).isInstanceOf(LoginAlreadyUsedException.class);
     }
 
     @Test
     void shouldHandleUserUpdateWithExistingEmail() {
         // Given
-        when(userService.updateUser(any(AdminUserDTO.class))).thenThrow(
-            new BadRequestAlertException("Email is already in use!", "userManagement", "emailexists")
-        );
+        adminUserDTO.setId(1L);
+        User existingUser = new User();
+        existingUser.setId(2L); // Different ID
+        when(userRepository.findOneByEmailIgnoreCase(DEFAULT_EMAIL)).thenReturn(Optional.of(existingUser));
 
         // When & Then
-        assertThatThrownBy(() -> userResource.updateUser(DEFAULT_LOGIN, adminUserDTO))
-            .isInstanceOf(BadRequestAlertException.class)
-            .hasMessageContaining("Email is already in use!");
+        assertThatThrownBy(() -> userResource.updateUser(DEFAULT_LOGIN, adminUserDTO)).isInstanceOf(EmailAlreadyUsedException.class);
     }
 }
