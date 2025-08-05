@@ -201,7 +201,7 @@ public class UserService {
                 user.setImageUrl(userDTO.getImageUrl());
                 user.setActivated(userDTO.isActivated());
                 user.setLangKey(userDTO.getLangKey());
-                Set<Authority> managedAuthorities = user.getAuthorities();
+                Set<Authority> managedAuthorities = new HashSet<>(user.getAuthorities());
                 managedAuthorities.clear();
                 userDTO
                     .getAuthorities()
@@ -210,6 +210,7 @@ public class UserService {
                     .filter(Optional::isPresent)
                     .map(Optional::get)
                     .forEach(managedAuthorities::add);
+                user.setAuthorities(managedAuthorities);
                 userRepository.save(user);
                 this.clearUserCaches(user);
                 LOG.debug("Changed Information for User: {}", user);
