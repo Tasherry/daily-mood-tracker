@@ -136,11 +136,10 @@ class UserResourceTest {
         // Given
         when(userService.getUserWithAuthoritiesByLogin("unknown")).thenReturn(Optional.empty());
 
-        // When
-        ResponseEntity<AdminUserDTO> response = userResource.getUser("unknown");
-
-        // Then
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        // When & Then
+        assertThatThrownBy(() -> userResource.getUser("unknown"))
+            .isInstanceOf(ResponseStatusException.class)
+            .hasFieldOrPropertyWithValue("statusCode", HttpStatus.NOT_FOUND);
     }
 
     @Test
@@ -169,11 +168,10 @@ class UserResourceTest {
         when(userRepository.findOneByLogin(DEFAULT_LOGIN.toLowerCase())).thenReturn(Optional.empty());
         when(userService.updateUser(any(AdminUserDTO.class))).thenReturn(Optional.empty());
 
-        // When
-        ResponseEntity<AdminUserDTO> response = userResource.updateUser(DEFAULT_LOGIN, adminUserDTO);
-
-        // Then
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        // When & Then
+        assertThatThrownBy(() -> userResource.updateUser(DEFAULT_LOGIN, adminUserDTO))
+            .isInstanceOf(ResponseStatusException.class)
+            .hasFieldOrPropertyWithValue("statusCode", HttpStatus.NOT_FOUND);
     }
 
     @Test

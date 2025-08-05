@@ -390,6 +390,10 @@
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-javadoc-plugin</artifactId>
             </plugin>
             <plugin>
@@ -817,6 +821,7 @@
                     <groupId>org.jacoco</groupId>
                     <artifactId>jacoco-maven-plugin</artifactId>
                     <version>${jacoco-maven-plugin.version}</version>
+                    <!-- Temporarily disabled for Java 24 compatibility
                     <executions>
                         <execution>
                             <id>pre-unit-tests</id>
@@ -845,6 +850,7 @@
                             </goals>
                         </execution>
                     </executions>
+                    -->
                 </plugin>
                 <plugin>
                     <groupId>org.liquibase</groupId>
